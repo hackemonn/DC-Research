@@ -1,6 +1,6 @@
 import pytest
 import os
-
+from datetime import datetime
 from src.data_processor import DataProcessor
 
 class Test1:
@@ -36,6 +36,7 @@ class Test1:
                 'acc_balance': 5000,
             })
             
+
             print(dp.enoughFunds('c1', 100))
 
             cur.execute('SELECT merchant_id, category, description, acc_balance FROM merchants WHERE merchant_id = ?', ('m1',))
@@ -43,14 +44,32 @@ class Test1:
             assert mrow is not None
             assert mrow[0] == 'm1'
 
-            # add history entry
-            dp.add_h_data({
+            if(dp.enoughFunds('c1', 100)):
+                dp.make_transaction(
+                'c1', 
+                'm1', 
+                100, 
+                't1',
+                datetime.utcnow().isoformat())
+                dp.add_h_data({
                 'customer_id': 'c1',
                 'merchant_id': 'm1',
                 'amount': 100,
                 'b_old': 1000,
                 'b_new': 900,
-            })
+                'isRejected': 1
+                })
+            else: 
+                print("Transaction failed, insufficient balance")
+                dp.add_h_data({
+                'customer_id': 'c1',
+                'merchant_id': 'm1',
+                'amount': 100,
+                'b_old': 1000,
+                'b_new': 900,
+                'isRejected': 1
+                })
+
 
             hist = dp.get_historical_data()
             assert isinstance(hist, list)

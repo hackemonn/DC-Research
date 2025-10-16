@@ -63,6 +63,7 @@ class DataProcessor:
                 description TEXT
             );
         ''')
+        #Transactions include all successful transactions, and history contains all data
 
         #For the sake of simplicity whenever someone gets a salary every t period, merchant no. 1e9+7
         #is going to pay the customer the level x salary
@@ -172,7 +173,7 @@ class DataProcessor:
         )
         
         result = cursor.fetchone()
-        
+
         value = result[0]
 
         if(value >= amount):
@@ -180,9 +181,33 @@ class DataProcessor:
         else:
             return False
 
-    def make_transaction(self, customer_id, merchant_id, amount):
-        if(enoughFunds(customer_id, amount)):
-            print("all good")
+    def balance_query(self, customer_id): 
+        cursor = self.db_conn.cursor()
+        cursor.execute('''
+        SELECT acc_balance
+        FROM customers
+        WHERE customer_id = ?
+        ''', (customer_id,))
+        value = cursor.fetchone()
+        return value[0]
+
+
+    def make_transaction(self, customer_id, merchant_id, amount, tr_id, time):
+        if(self.enoughFunds(customer_id, amount)):
+            cursor = self.db_conn.cursor()
+            cursor.execute('''
+            UPDATE customers
+            SET acc_balance = acc_balance - ?
+            WHERE customer_id = ?;
+            ''', (amount, customer_id))
+            cursor.execute('''UPDATE merchants
+            SET acc_balance = acc_balance + ? 
+            WHERE merchant_id = ?
+                           ''', (amount, merchant_id))
+            b = self.balance_query(customer_id)
+
+            self.add_h_data((tr_id, customer_id, merchant_id, amount, time, 0, b + amount, b))
+            
         else:
             return False
 
