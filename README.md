@@ -21,7 +21,7 @@ Week 3: Test the idea on Polygon Mumbai testnet, using a smart contract, and sim
 
 Week 4/5: Create a polished UX/UI for our simulation and make deductions. 
 
-## tools required: 
+## tools required 
 
 VSCode, Libraries, Figma
 
