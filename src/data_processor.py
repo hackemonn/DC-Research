@@ -14,8 +14,8 @@ class DataProcessor:
         db_dir = os.path.dirname(db_file)
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
-
         self.db_conn = sqlite3.connect(db_file, check_same_thread=False)
+        self.cursor = self.db_conn.cursor()
         self._init_db()
     
     # Set up database tables
@@ -30,7 +30,8 @@ class DataProcessor:
                 salary REAL,
                 level INTEGER, -- level 1: base salary, level 2: higher salary, level 3: highest salary
                 acc_balance REAL,
-                description TEXT
+                description TEXT,
+                industry TEXT
             );
             CREATE TABLE IF NOT EXISTS relationship (
                 customer_id TEXT,
@@ -63,7 +64,6 @@ class DataProcessor:
             );
         ''')
         #Transactions include all successful transactions, and history contains all data
-
         #For the sake of simplicity whenever someone gets a salary every t period, merchant no. 1e9+7
         #is going to pay the customer the level x salary
         self.db_conn.commit()
@@ -77,8 +77,8 @@ class DataProcessor:
             raise ValueError('customer must include customer_id or id')
 
         cursor.execute('''
-            INSERT OR REPLACE INTO customers (customer_id, age, name_full, profession, salary, level, acc_balance, description)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO customers (customer_id, age, name_full, profession, salary, level, acc_balance, description, industry)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             customer_id,
             customer.get('age'),
@@ -87,7 +87,8 @@ class DataProcessor:
             customer.get('salary') or 0,
             customer.get('level'),
             customer.get('acc_balance') or 0,
-            customer.get('description')
+            customer.get('description'),
+            customer.get('industry')
         ))       
     
     def save_merchant(self, merchant):
@@ -209,6 +210,12 @@ class DataProcessor:
             
         else:
             return False
+    
+    def clean_pc(self):
+        self.cursor.executescript('''
+        DELETE from customers;DELETE from merchants; DELETE from history; DELETE from merchants;
+        ''')
+    
 
     
 

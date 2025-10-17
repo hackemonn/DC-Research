@@ -21,12 +21,16 @@ logger = logging.getLogger(__name__)
 class Incentive:
     def __init__(self, customer_id, db_file=os.path.join("data", "pc.db")):
         # ensure the data directory exists
-        db_dir = os.path.dirname(db_file)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
-        self.customer_id = customer_id
-        self.db_conn = sqlite3.connect(db_file, check_same_thread=False)
-        self._init_db()
+        try:   
+            db_dir = os.path.dirname(db_file)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
+            self.customer_id = customer_id
+            self.db_conn = sqlite3.connect(db_file, check_same_thread=False)
+        
+            self._init_db()
+        except sqlite3.Error as e:
+            logger.error(f"DB Error found: {e}")
     
     def _init_db(self):
         cursor = self.db_conn.cursor()

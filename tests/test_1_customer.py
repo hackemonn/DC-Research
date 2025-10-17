@@ -11,7 +11,7 @@ class Test1:
     def testing(self):
         try:
             print("running Test1.testing()")
-            dp = DataProcessor(db_file=os.path.join("data", "pc.db"))
+            dp = DataProcessor()
 
             # save a customer
             dp.save_customer({
@@ -23,6 +23,7 @@ class Test1:
                 'level': 3,
                 'acc_balance': 1000,
                 'description': 'VIP customer',
+                'industry': 'tech'
             })
             
             cur = dp.db_conn.cursor()

@@ -17,11 +17,9 @@ Week 1: Create a **functional simulation using dummy variables of different peop
 
 Week 2: Incorporate AI models, to simulate different profiles for each person based on variables, like profession, transaction velocity, merchant diversity, and encourage spending if money remains idle for a while, or flag outlier transactions, and ask further clarifications. 
 
-Week 3: Test the idea on Polygon Mumbai testnet, using a smart contract, and simulate transactions in real life 
+Week 3/4: Create a polished UX/UI for our simulation and add further features 
 
-Week 4/5: Create a polished UX/UI for our simulation and make deductions. 
-
-## tools required 
+## Tools required 
 
 VSCode, Libraries, Figma
 
