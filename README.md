@@ -1,27 +1,36 @@
-# Advanced Digital Currency Simulation
+# Next-Gen Digital Currency Simulation
 
-Simulating the next generation digital financial systems for research and experimentation.
+An AI-Ready simulation of programmable digital currencies (CBDC) for the next generation digital financial systems for **research and experimentation**.
 
 The project aims to create a **high-fidelity simulation platform for digital currency environments**,
-designed to explore how different actors - users, merchants, and financial intermediaries - can interact together in a synthetic economy. While fully safe for public use, the platform allows for deep experimentation in financial modeling, transaction flows, and risk scoring. 
+designed to analyze customer and merchant behavior under tiered incentives and velocity-based spending models.
+
+
+(The project is in active development. Contributions, feedback, and ideas are greatly appreciated, especially for AI modeling, and designing architecture)
+
+## Motivation
+
+- Current financial systems can't prototype with programmable money due to high risk of blowback. 
+- Existing CBDC simulations are too slow, centralized, and lack observations of potential future pipelines built on digital currencies. 
+- Traditional payment processing platforms are underestimating the true power behind CBDC, giving anyone an immense edge working in this area.
+- Incentives like automatic cashback on consumption can stimulate spending before macroeconomic tools are even applied.
 
 ## Objectives
     
 - Simulate complex interactions between participants across different industries, demographics, and account tiers. 
-- Support thousands of simultaneous transactions, stress testing the simulation of economic behavior under extreme conditions. 
-- Uses Python based backend with SQLite for prototyping (easily migratable to PostgreSQL or C++ later)
+- Support **thousands of simultaneous transactions**, stress testing the simulation of economic behavior under extreme conditions. 
+- Use Python based backend with ~~SQLite~~ PostgreSQL for prototyping ~~(later migrate to PostgreSQL or C++)~~
+- Examine how CBDCs can considerably be more efficient than current traditonal systems
+- Learn **as much as possible**, and iterate **as fast as possible**
 
 ## Milestones To Hit 
 
-Week 1: Create a **functional simulation using dummy variables of different people**, and simulate transactions, while handing out salaries in a tiered level every t seconds. 
+Week 1: Create a **functional simulation**.
 
 Week 2: Incorporate AI models, to simulate different profiles for each person based on variables, like profession, transaction velocity, merchant diversity, and encourage spending if money remains idle for a while, or flag outlier transactions, and ask further clarifications. 
 
 Week 3/4: Create a polished UX/UI for our simulation and add further features 
 
-## Tools required 
-
-VSCode, Libraries, Figma
 
 ## Disclaimer 
 
