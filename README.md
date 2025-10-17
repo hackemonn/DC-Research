@@ -6,7 +6,7 @@ The project aims to create a **high-fidelity simulation platform for digital cur
 designed to analyze customer and merchant behavior under tiered incentives and velocity-based spending models.
 
 
-(The project is in active development. Contributions, feedback, and ideas are greatly appreciated, especially for AI modeling, and designing architecture)
+(Contributions, feedback, and ideas are greatly appreciated, especially for AI modeling, and designing architecture)
 
 ## Motivation
 
@@ -18,20 +18,20 @@ designed to analyze customer and merchant behavior under tiered incentives and v
 ## Objectives
     
 - Simulate complex interactions between participants across different industries, demographics, and account tiers. 
-- Support **thousands of simultaneous transactions**, stress testing the simulation of economic behavior under extreme conditions. 
-- Use Python based backend with ~~SQLite~~ PostgreSQL for prototyping ~~(later migrate to PostgreSQL or C++)~~
-- Examine how CBDCs can considerably be more efficient than current traditonal systems
-- Learn **as much as possible**, and iterate **as fast as possible**
+- Support **thousands of simultaneous transactions**, stress testing the simulation of economic behavior under high-frequency and high-volume conditions. 
+- Use Python based backend with PostgreSQL; SQLite used only for early experimentation
+- Examine how CBDCs can considerably be more efficient than current traditional systems
+- Learn **a lot**, and iterate **fast**
 
 ## Milestones To Hit 
 
 Week 1: Create a **functional simulation**.
 
-Week 2: Incorporate AI models, to simulate different profiles for each person based on variables, like profession, transaction velocity, merchant diversity, and encourage spending if money remains idle for a while, or flag outlier transactions, and ask further clarifications. 
+Week 2: Incorporate local AI models with cloud learning, to simulate different profiles for each person based on variables, like profession, transaction velocity, merchant diversity, and encourage spending if money remains idle for a while, or flag outlier transactions, and ask further clarifications. 
 
 Week 3/4: Create a polished UX/UI for our simulation and add further features 
 
 
 ## Disclaimer 
 
-The information, materials, or content provided herein are intended for research and educational purposes only. They are not professional advice and should not be relied upon for legal, medical, financial, or other professional decisions. The author assumes no responsibility or liability for any consequences arising from the use of this content.
+The information, materials, or content provided herein are intended for research and educational purposes only. They are not professional advice and should not be relied upon for legal, medical, financial, or other professional decisions. No real financial transactions are processed, and all currency is simulated. The author assumes no responsibility or liability for any consequences arising from the use of this content. 
