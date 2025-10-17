@@ -1,7 +1,11 @@
-import pytest
+import logging
 import os
 from datetime import datetime
 from src.data_processor import DataProcessor
+
+
+logger = logging.getLogger(__name__)
+
 
 class Test1:
     def testing(self):
@@ -37,7 +41,7 @@ class Test1:
             })
             
 
-            print(dp.enoughFunds('c1', 100))
+            logger.info(dp.enoughFunds('c1', 100))
 
             cur.execute('SELECT merchant_id, category, description, acc_balance FROM merchants WHERE merchant_id = ?', ('m1',))
             mrow = cur.fetchone()
@@ -59,8 +63,9 @@ class Test1:
                 'b_new': 900,
                 'isRejected': 1
                 })
+                logger.info(f"Successful transaction")
             else: 
-                print("Transaction failed, insufficient balance")
+                logger.error("Transaction failed, insufficient balance")
                 dp.add_h_data({
                 'customer_id': 'c1',
                 'merchant_id': 'm1',
@@ -78,7 +83,7 @@ class Test1:
             assert hist[0]['merchant_id'] == 'm1'
             assert hist[0]['amount'] == 100
 
-            print("Test1.testing(): checks passed")
+            logger.info("Test1.testing(): checks passed")
         except Exception as e:
-            print(f"issue found in {e}")
+            logger.error(f"issue found in {e}")
             raise

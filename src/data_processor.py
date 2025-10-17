@@ -5,7 +5,6 @@ from datetime import datetime
 import uuid
 
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class DataProcessor:  
