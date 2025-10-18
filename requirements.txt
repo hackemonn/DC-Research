@@ -1,0 +1,6 @@
+psycopg[binary,pool]
+numpy>=1.25
+pandas>=2.1
+scikit-learn>=1.3
+loguru>=0.7
+python-dotenv>=1.0
