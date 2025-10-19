@@ -1,268 +1,292 @@
 import os
 import logging
-from datetime import datetime
+import asyncio
 import uuid
-import psycopg2
-from psycopg2.extras import DictCursor
+from datetime import datetime
+from decimal import Decimal
+
 from dotenv import load_dotenv
 
+import asyncpg
+
+
+# Logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-class DataProcessor:
+# Constants
+BONUS_RATE = 0.03
+DECAY_RATE = 0.02
+TARGET_VELOCITY = 0.5
 
+
+class DataProcessor:
     def __init__(self):
-        # Load environment variables
+
         load_dotenv()
 
+        self.db_url = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASS')}@{os.getenv('DB_HOST','localhost')}:{os.getenv('DB_PORT','5432')}/{os.getenv('DB_NAME')}"
+        self.pool = None
+
+    async def init(self):
         try:
-            self.db_conn = psycopg2.connect(
-                dbname=os.getenv("DB_NAME"),
-                user=os.getenv("DB_USER"),
-                password=os.getenv("DB_PASS"),
-                host=os.getenv("DB_HOST", "localhost"),
-                port=os.getenv("DB_PORT", "5432"),
-                cursor_factory=DictCursor
-            )
-            self._init_db()
+            self.pool = await asyncpg.create_pool(dsn=self.db_url, min_size=1, max_size=10)
+            await self._init_db()
         except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
+            logger.error(f"Failed to initialize DB pool: {e}")
             raise
 
-    def _init_db(self):
-        try:
-            with self.db_conn.cursor() as cursor:
-                # Ensure pgcrypto extension exists for gen_random_uuid()
-                cursor.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto";')
+    # Initialize Database
+    async def _init_db(self):
+        async with self.pool.acquire() as conn:
+            try:
+                await conn.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto";')
 
-                # Create tables
-                cursor.execute('''
+                # Core tables
+                await conn.execute('''
+                CREATE TABLE IF NOT EXISTS customers (
+                    customer_id TEXT PRIMARY KEY,
+                    age INT CHECK(age >= 0) DEFAULT 18,
+                    name_full TEXT NOT NULL,
+                    profession TEXT DEFAULT 'Unknown',
+                    salary NUMERIC(20,4) DEFAULT 0.0,
+                    level INT CHECK(level > 0) DEFAULT 1,
+                    acc_balance NUMERIC(20,4) DEFAULT 0.0,
+                    description TEXT DEFAULT '',
+                    industry TEXT DEFAULT 'General',
+                    behavior TEXT DEFAULT 'Conservative',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );''')
+
+                await conn.execute('''
                 CREATE TABLE IF NOT EXISTS merchants (
                     merchant_id TEXT PRIMARY KEY,
                     category TEXT DEFAULT 'General',
                     description TEXT DEFAULT '',
-                    acc_balance NUMERIC(20,4) DEFAULT 0.0000,
+                    acc_balance NUMERIC(20,4) DEFAULT 0.0,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                ''')
+                );''')
 
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS customers (
-                    customer_id TEXT PRIMARY KEY,
-                    age INTEGER CHECK (age >= 0) DEFAULT 18,
-                    name_full TEXT NOT NULL,
-                    profession TEXT DEFAULT 'Unknown',
-                    salary NUMERIC(20,4) DEFAULT 0.0000,
-                    level INTEGER CHECK (level > 0) DEFAULT 1,
-                    acc_balance NUMERIC(20,4) DEFAULT 0.0000,
-                    description TEXT DEFAULT '',
-                    industry TEXT DEFAULT 'General',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                ''')
-
-                cursor.execute('''
+                await conn.execute('''
                 CREATE TABLE IF NOT EXISTS history (
                     history_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    customer_id TEXT NOT NULL REFERENCES customers(customer_id),
-                    merchant_id TEXT NOT NULL REFERENCES merchants(merchant_id),
-                    amount NUMERIC(20,4) NOT NULL DEFAULT 0.0000,
+                    customer_id TEXT REFERENCES customers(customer_id),
+                    merchant_id TEXT REFERENCES merchants(merchant_id),
+                    amount NUMERIC(20,4) DEFAULT 0.0,
                     time TIMESTAMPTZ DEFAULT NOW(),
                     is_rejected BOOLEAN DEFAULT FALSE,
-                    b_old NUMERIC(20,4) DEFAULT 0.0000,
-                    b_new NUMERIC(20,4) DEFAULT 0.0000
-                );
-                ''')
+                    b_old NUMERIC(20,4) DEFAULT 0.0,
+                    b_new NUMERIC(20,4) DEFAULT 0.0
+                );''')
 
-            self.db_conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to initialize database tables: {e}")
-            self.db_conn.rollback()
-            raise
+                # Metrics tables
+                await conn.execute('''
+                CREATE TABLE IF NOT EXISTS cust_core (
+                    cust_id TEXT PRIMARY KEY REFERENCES customers(customer_id),
+                    avg_daily_bal NUMERIC(20,4) DEFAULT 0.0,
+                    max_bal NUMERIC(20,4) DEFAULT 0.0,
+                    min_bal NUMERIC(20,4) DEFAULT 0.0,
+                    bal_std NUMERIC(20,4) DEFAULT 0.0,
+                    inactive_days INT DEFAULT 0,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );''')
 
-    def save_customer(self, customer: dict):
+                await conn.execute('''
+                CREATE TABLE IF NOT EXISTS freqvol (
+                    cust_id TEXT PRIMARY KEY REFERENCES customers(customer_id),
+                    num_tr_day INT DEFAULT 0,
+                    num_tr_week INT DEFAULT 0,
+                    avg_tr_val NUMERIC(20,4) DEFAULT 0.0,
+                    total_tr_val NUMERIC(20,4) DEFAULT 0.0,
+                    tr_std NUMERIC(20,4) DEFAULT 0.0,
+                    velocity NUMERIC(20,4) DEFAULT 0.0,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );''')
+
+                await conn.execute('''
+                CREATE TABLE IF NOT EXISTS cust_incentives (
+                    cust_id TEXT PRIMARY KEY REFERENCES customers(customer_id),
+                    cashback_earned NUMERIC(20,4) DEFAULT 0.0,
+                    decay_loss_cnt INT DEFAULT 0,
+                    incentive_resp NUMERIC(5,4) DEFAULT 1.0,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );''')
+
+                logger.info("Database tables initialized successfully.")
+            except Exception as e:
+                logger.error(f"DB initialization error: {e}")
+                raise
+
+    # Core functions
+    async def save_customer(self, customer: dict):
         try:
-            customer_id = customer.get('id')
-            if not customer_id:
-                raise ValueError("Customer dict must include 'id' key")
-            with self.db_conn.cursor() as cursor:
-                cursor.execute('''
-                    INSERT INTO customers
-                        (customer_id, age, name_full, profession, salary, level, acc_balance, description, industry)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (customer_id) DO UPDATE SET
-                        age = EXCLUDED.age,
-                        name_full = EXCLUDED.name_full,
-                        profession = EXCLUDED.profession,
-                        salary = EXCLUDED.salary,
-                        level = EXCLUDED.level,
-                        acc_balance = EXCLUDED.acc_balance,
-                        description = EXCLUDED.description,
-                        industry = EXCLUDED.industry,
-                        updated_at = NOW()
-                ''', (
-                    customer_id,
-                    customer.get('age', 18),
-                    customer.get('name_full') or customer.get('name'),
-                    customer.get('profession', 'Unknown'),
-                    customer.get('salary', 0.0),
-                    customer.get('level', 1),
-                    customer.get('acc_balance', 0.0),
-                    customer.get('description', ''),
-                    customer.get('industry', 'General')
-                ))
-            self.db_conn.commit()
+            async with self.pool.acquire() as conn:
+                await conn.execute('''
+                INSERT INTO customers(customer_id, age, name_full, profession, salary, level, acc_balance, description, industry, behavior)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                ON CONFLICT(customer_id) DO UPDATE SET
+                    age=EXCLUDED.age,
+                    name_full=EXCLUDED.name_full,
+                    profession=EXCLUDED.profession,
+                    salary=EXCLUDED.salary,
+                    level=EXCLUDED.level,
+                    acc_balance=EXCLUDED.acc_balance,
+                    description=EXCLUDED.description,
+                    industry=EXCLUDED.industry,
+                    behavior=EXCLUDED.behavior,
+                    updated_at=NOW()
+                ''',
+                customer['id'], customer.get('age', 18), customer.get('name_full') or customer.get('name'),
+                customer.get('profession', 'Unknown'), customer.get('salary', 0.0), customer.get('level', 1),
+                customer.get('acc_balance', 0.0), customer.get('description',''), customer.get('industry','General'),
+                customer.get('behavior', 'Conservative'))
+                logger.info(f"Customer {customer['id']} saved/updated successfully.")
         except Exception as e:
             logger.error(f"Error saving customer {customer.get('id')}: {e}")
-            self.db_conn.rollback()
 
-    def save_merchant(self, merchant: dict):
+    async def save_merchant(self, merchant: dict):
         try:
             merchant_id = merchant.get('merchant_id') or merchant.get('id')
-            if not merchant_id:
-                raise ValueError("Merchant dict must include 'merchant_id' or 'id'")
-            with self.db_conn.cursor() as cursor:
-                cursor.execute('''
-                    INSERT INTO merchants
-                        (merchant_id, category, description, acc_balance)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (merchant_id) DO UPDATE SET
-                        category = EXCLUDED.category,
-                        description = EXCLUDED.description,
-                        acc_balance = EXCLUDED.acc_balance,
-                        updated_at = NOW()
-                ''', (
-                    merchant_id,
-                    merchant.get('category', 'General'),
-                    merchant.get('description', ''),
-                    merchant.get('acc_balance', 0.0)
-                ))
-            self.db_conn.commit()
+            async with self.pool.acquire() as conn:
+                await conn.execute('''
+                INSERT INTO merchants(merchant_id, category, description, acc_balance)
+                VALUES($1,$2,$3,$4)
+                ON CONFLICT(merchant_id) DO UPDATE SET
+                    category=EXCLUDED.category,
+                    description=EXCLUDED.description,
+                    acc_balance=EXCLUDED.acc_balance,
+                    updated_at=NOW()
+                ''',
+                merchant_id, merchant.get('category','General'), merchant.get('description',''), merchant.get('acc_balance',0.0))
+                logger.info(f"Merchant {merchant_id} saved/updated successfully.")
         except Exception as e:
-            logger.error(f"Error saving merchant {merchant.get('id')}: {e}")
-            self.db_conn.rollback()
+            logger.error(f"Error saving merchant {merchant_id}: {e}")
 
-    def get_historical_data(self):
-        try:
-            with self.db_conn.cursor() as cursor:
-                cursor.execute('''
-                    SELECT h.history_id, h.customer_id, c.name_full, h.merchant_id, m.category,
-                           h.amount, h.time, h.is_rejected, h.b_old, h.b_new
-                    FROM history h
-                    LEFT JOIN customers c ON c.customer_id = h.customer_id
-                    LEFT JOIN merchants m ON m.merchant_id = h.merchant_id
-                    ORDER BY h.time DESC
-                ''')
-                rows = cursor.fetchall()
-                data = []
-                for row in rows:
-                    data.append({
-                        'history_id': row['history_id'],
-                        'customer_id': row['customer_id'],
-                        'customer_name': row['name_full'],
-                        'merchant_id': row['merchant_id'],
-                        'merchant_category': row['category'],
-                        'amount': row['amount'],
-                        'time': row['time'],
-                        'is_rejected': row['is_rejected'],
-                        'b_old': row['b_old'],
-                        'b_new': row['b_new']
-                    })
-                return data
-        except Exception as e:
-            logger.error(f"Error fetching historical data: {e}")
-            return []
-
-    def add_h_data(self, values):
-        try:
-            if isinstance(values, dict):
-                history_id = values.get('history_id') or str(uuid.uuid4())
-                customer_id = values.get('customer_id')
-                merchant_id = values.get('merchant_id')
-                amount = values.get('amount', 0.0)
-                time = values.get('time') or datetime.utcnow()
-                is_rejected = values.get('is_rejected', False)
-                b_old = values.get('b_old', 0.0)
-                b_new = values.get('b_new', 0.0)
-            else:
-                (history_id, customer_id, merchant_id, amount, time, is_rejected, b_old, b_new) = values
-
-            with self.db_conn.cursor() as cursor:
-                cursor.execute('''
-                    INSERT INTO history
-                        (history_id, customer_id, merchant_id, amount, time, is_rejected, b_old, b_new)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (history_id) DO NOTHING
-                ''', (history_id, customer_id, merchant_id, amount, time, is_rejected, b_old, b_new))
-            self.db_conn.commit()
-        except Exception as e:
-            logger.error(f"Error adding history data: {e}")
-            self.db_conn.rollback()
-
-    def enough_funds(self, customer_id, amount: float = 0.0):
-        try:
-            with self.db_conn.cursor() as cursor:
-                cursor.execute('SELECT acc_balance FROM customers WHERE customer_id = %s', (customer_id,))
-                result = cursor.fetchone()
-                if not result:
-                    raise ValueError(f"Customer {customer_id} not found")
-                return result['acc_balance'] >= amount
-        except Exception as e:
-            logger.error(f"Error checking funds for customer {customer_id}: {e}")
-            return False
-
-    def balance_query(self, customer_id):
-        try:
-            with self.db_conn.cursor() as cursor:
-                cursor.execute('SELECT acc_balance FROM customers WHERE customer_id = %s', (customer_id,))
-                result = cursor.fetchone()
-                if not result:
-                    raise ValueError(f"Customer {customer_id} not found")
-                return result['acc_balance']
-        except Exception as e:
-            logger.error(f"Error querying balance for {customer_id}: {e}")
-            return 0.0
-
-    def make_transaction(self, customer_id, merchant_id, amount, tr_id=None, time=None):
-        tr_id = tr_id or str(uuid.uuid4())
-        time = time or datetime.utcnow()
-        try:
-            with self.db_conn:
-                with self.db_conn.cursor() as cursor:
-                    cursor.execute('SELECT acc_balance FROM customers WHERE customer_id = %s', (customer_id,))
-                    cust_row = cursor.fetchone()
-                    if not cust_row or cust_row['acc_balance'] < amount:
+    # make transaction
+    async def make_transaction(self, customer_id, merchant_id, amount: float):
+        tr_id = str(uuid.uuid4())
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                try:
+                    cust = await conn.fetchrow('SELECT acc_balance FROM customers WHERE customer_id=$1', customer_id)
+                    if not cust:
+                        logger.warning(f"Customer {customer_id} not found")
+                        return False
+                    if cust['acc_balance'] < amount:
                         logger.warning(f"Transaction failed: insufficient funds for {customer_id}")
+                        # record rejected transaction
+                        await conn.execute('''
+                        INSERT INTO history(customer_id, merchant_id, amount, is_rejected, b_old, b_new)
+                        VALUES($1,$2,$3,TRUE,$4,$4)
+                        ''', customer_id, merchant_id, amount, cust['acc_balance'])
                         return False
 
-                    b_old = cust_row['acc_balance']
-                    b_new = b_old - amount
+                    b_old = cust['acc_balance']
+                    b_new = b_old - Decimal(amount)
 
-                    cursor.execute('UPDATE customers SET acc_balance = %s, updated_at = NOW() WHERE customer_id = %s',
-                                   (b_new, customer_id))
-                    cursor.execute('UPDATE merchants SET acc_balance = acc_balance + %s, updated_at = NOW() WHERE merchant_id = %s',
-                                   (amount, merchant_id))
-                    self.add_h_data({
-                        'history_id': tr_id,
-                        'customer_id': customer_id,
-                        'merchant_id': merchant_id,
-                        'amount': amount,
-                        'time': time,
-                        'is_rejected': False,
-                        'b_old': b_old,
-                        'b_new': b_new
-                    })
-            return True
-        except Exception as e:
-            logger.error(f"Error making transaction {tr_id}: {e}")
-            self.db_conn.rollback()
-            return False
+                    await conn.execute('UPDATE customers SET acc_balance=$1, updated_at=NOW() WHERE customer_id=$2', b_new, customer_id)
+                    await conn.execute('UPDATE merchants SET acc_balance=acc_balance+$1, updated_at=NOW() WHERE merchant_id=$2', amount, merchant_id)
 
-    def __del__(self):
+                    await conn.execute('''
+                    INSERT INTO history(history_id, customer_id, merchant_id, amount, b_old, b_new)
+                    VALUES($1,$2,$3,$4,$5,$6)
+                    ''', tr_id, customer_id, merchant_id, amount, b_old, b_new)
+
+                    # Update metrics asynchronously
+                    asyncio.create_task(self.update_metrics(customer_id, amount, b_new))
+
+                    return True
+                except Exception as e:
+                    logger.error(f"Error processing transaction {tr_id}: {e}")
+                    raise
+
+    # Metrics
+
+    #issues to solve tomorrow
+    #Float and decimal being not compatible with each other
+    async def update_metrics(self, cust_id, amount, b_new):
+        amount = Decimal(amount)
+        b_new = Decimal(b_new)
+        async with self.pool.acquire() as conn:
+            try:
+                # --- cust_core ---
+                core = await conn.fetchrow('SELECT * FROM cust_core WHERE cust_id=$1', cust_id)
+                if not core:
+                    await conn.execute('INSERT INTO cust_core(cust_id, avg_daily_bal, max_bal, min_bal, bal_std, inactive_days) VALUES($1,$2,$3,$4,$5,$6)', cust_id, b_new, b_new, b_new, 0.0, 0)
+                else:
+                    avg_daily_bal = (core['avg_daily_bal'] + b_new) / 2
+                    max_bal = max(core['max_bal'], b_new)
+                    min_bal = min(core['min_bal'], b_new)
+                    await conn.execute('UPDATE cust_core SET avg_daily_bal=$1, max_bal=$2, min_bal=$3, updated_at=NOW() WHERE cust_id=$4',
+                                       avg_daily_bal, max_bal, min_bal, cust_id)
+
+                # --- freqvol ---
+                freq = await conn.fetchrow('SELECT * FROM freqvol WHERE cust_id=$1', cust_id)
+                if not freq:
+                    await conn.execute('INSERT INTO freqvol(cust_id, num_tr_day, num_tr_week, avg_tr_val, total_tr_val, velocity) VALUES($1,1,1,$2,$2,$3)',
+                                       cust_id, amount, amount / TARGET_VELOCITY)
+                else:
+                    num_tr_day = freq['num_tr_day'] + 1
+                    num_tr_week = freq['num_tr_week'] + 1
+                    total_tr_val = freq['total_tr_val'] + amount
+                    avg_tr_val = total_tr_val / num_tr_week
+                    velocity = total_tr_val / TARGET_VELOCITY
+                    await conn.execute('UPDATE freqvol SET num_tr_day=$1, num_tr_week=$2, total_tr_val=$3, avg_tr_val=$4, velocity=$5, updated_at=NOW() WHERE cust_id=$6',
+                                       num_tr_day, num_tr_week, total_tr_val, avg_tr_val, velocity, cust_id)
+
+                # --- cust_incentives ---
+                inc = await conn.fetchrow('SELECT * FROM cust_incentives WHERE cust_id=$1', cust_id)
+                bonus = amount * Decimal(BONUS_RATE)
+                if not inc:
+                    await conn.execute('INSERT INTO cust_incentives(cust_id, cashback_earned, decay_loss_cnt, incentive_resp) VALUES($1,$2,0,1.0)',
+                                       cust_id, bonus)
+                else:
+                    cashback = inc['cashback_earned'] + bonus
+                    decay_loss = inc['decay_loss_cnt']
+                    incentive_resp = min(1.0, inc['incentive_resp'] + 0.01)
+                    await conn.execute('UPDATE cust_incentives SET cashback_earned=$1, decay_loss_cnt=$2, incentive_resp=$3, updated_at=NOW() WHERE cust_id=$4',
+                                       cashback, decay_loss, incentive_resp, cust_id)
+
+                logger.info(f"Metrics updated for customer {cust_id}")
+            except Exception as e:
+                logger.error(f"Error updating metrics for customer {cust_id}: {e}")
+
+    # Fetch history 
+    async def get_historical_data(self):
+        async with self.pool.acquire() as conn:
+            try:
+                rows = await conn.fetch('''
+                SELECT h.history_id, h.customer_id, c.name_full, h.merchant_id, m.category, h.amount, h.time, h.is_rejected, h.b_old, h.b_new
+                FROM history h
+                LEFT JOIN customers c ON c.customer_id=h.customer_id
+                LEFT JOIN merchants m ON m.merchant_id=h.merchant_id
+                ORDER BY h.time DESC
+                ''')
+                return [dict(r) for r in rows]
+            except Exception as e:
+                logger.error(f"Failed fetching historical data: {e}")
+                return []
+
+    # Cleanup
+    async def close(self):
         try:
-            if self.db_conn:
-                self.db_conn.close()
+            await self.pool.close()
         except Exception as e:
-            logger.warning(f"Error closing DB connection: {e}")
+            logger.warning(f"Error closing DB pool: {e}")
+
+
+    # Clear database (Be careful)
+    async def clear_db(self):
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                try:
+                    # Delete from dependent tables first
+                    await conn.execute("DELETE history, cust_core, freqvol, cust_incentives RESTART IDENTITY CASCADE;")
+                    # Then core tables
+                    await conn.execute("DELETE customers, merchants RESTART IDENTITY CASCADE;")
+                    logger.info("Database cleared successfully for next test.")
+                except Exception as e:
+                    logger.error(f"Error clearing database: {e}")
+    

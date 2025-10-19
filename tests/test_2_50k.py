@@ -1,18 +1,28 @@
+import asyncio
 import numpy as np
 import pandas as pd
-import sqlite3
-import logging
+import random
 from datetime import datetime, timedelta
+import logging
+import uuid
+
+from src.data_layer.processor import DataProcessor
 
 logger = logging.getLogger(__name__)
 
 NUM_CUSTOMERS = 5000
 NUM_MERCHANTS = 500
-NUM_TRANSACTIONS = 50000  # total transactions to simulate
+NUM_TRANSACTIONS = 50000
 START_DATE = datetime(2025, 1, 1)
 END_DATE = datetime(2025, 9, 30)
 
 class Test2:
+
+    def __init__(self, processor: DataProcessor):
+        self.dp = processor
+        
+
+    # ------------------- Helpers -------------------
     def weighted_choice(self, choices, weights, size=1):
         return np.random.choice(choices, size=size, p=np.array(weights)/np.sum(weights))
 
@@ -20,116 +30,112 @@ class Test2:
         delta = end - start
         return [start + timedelta(seconds=np.random.randint(0, int(delta.total_seconds()))) for _ in range(n)]
 
-
-    def generate_customers(n):
-        
-        #ages generated with no bias
-
+    # ------------------- Generate Customers -------------------
+    def generate_customers(self, n):
         ages = np.random.randint(18, 70, n)
-        
-        #roughly 50/50
         genders = np.random.choice(['M', 'F'], n)
-        
-        #not represenatative, but for our purposes it is sufficient
-
-        salary = np.random.randint(20000, 200000, n)
-        
-        #the industries of merchants
-
+        salaries = np.random.randint(20000, 200000, n)
         industries = np.random.choice(['Tech','Finance','Healthcare','Retail','Education'], n)
-        
-        #spending behavior of the customer
-        behavior = np.random.choice(['Aggressive','Moderate','Conservative'], n)
-        
-        df = pd.DataFrame({
-            'customer_id': range(1, n+1),
-            'age': ages,
-            'gender': genders,
-            'salary': salary,
-            'industry': industries,
-            'behavior': behavior
-        })
-        
-        # Risk score based on income & behavior
-        df['risk_score'] = df['income'] / 200000 + df['behavior'].map({'Aggressive': 0.3, 'Moderate': 0.1, 'Conservative': 0.0})
-        
-        # Salary segment using standard deviation
-        mean_income = df['income'].mean()
-        std_income = df['income'].std()
-        
-        def salary_segment(income):
-            if income < mean_income - std_income:
-                return 1  # basic salary
-            elif income > mean_income + std_income:
-                return 3  # highest salary
-            else:
-                return 2  # higher salary
-        
-        df['salary_segment'] = df['income'].apply(salary_segment)
-        
-        return df
+        behaviors = np.random.choice(['Aggressive','Moderate','Conservative'], n)
 
+        customers = []
+        for i in range(n):
+            customers.append({
+                'id': f'c{i+1}',
+                'age': int(ages[i]),
+                'name_full': f'c{i+1}',
+                'profession': '',
+                'salary': float(salaries[i]),
+                'level': 1,
+                'acc_balance': float(np.random.randint(1000, 20000)),
+                'description': '',
+                'industry': str(industries[i]),
+                'behavior': str(behaviors[i]),
+            })
+        return customers
+    
+    # Potentially useful tables to add: behavior, gender
+    # ------------------- Generate Merchants -------------------
+    def generate_merchants(self, n):
+        categories = ['Grocery','Tech','Entertainment','Healthcare','Retail']
+        merchants = []
+        for i in range(n):
+            merchants.append({
+                'merchant_id': f'm{i+1}',
+                'category': np.random.choice(categories),
+                'description': '',
+                'acc_balance': float(np.random.randint(5000, 50000)),  
+            })
+        return merchants
 
-
-    def generate_merchants(m):
-        categories = np.random.choice(['Grocery','Tech','Entertainment','Healthcare','Retail'], m)
-        avg_tx = np.random.randint(10, 500, m)
-        
-        df = pd.DataFrame({
-            'merchant_id': range(1, m+1),
-            'category': categories,
-            'avg_transaction': avg_tx
-        })
-        
-        return df
+    # ------------------- Generate Transactions -------------------
 
 
     def generate_transactions(self, customers, merchants, num_tx):
         transactions = []
         
-        # Map merchants by category for correlation
-        merchant_dict = merchants.groupby('category')['merchant_id'].apply(list).to_dict()
+        # Build merchant dictionary by category
+        merchant_dict = {}
+        for m in merchants:
+            if m['category'] not in merchant_dict:
+                merchant_dict[m['category']] = []
+            merchant_dict[m['category']].append(m['merchant_id'])
+        
+        #t = True
         
         for _ in range(num_tx):
-            cust = customers.sample(1).iloc[0]
+            # Pick a random customer from the list
+            cust = random.choice(customers)  # cust is a dict
             
-            # Choose merchant category weighted by income & behavior
-            if cust['income'] > 120000:
-                category_weights = {'Tech': 0.4, 'Entertainment': 0.3, 'Grocery': 0.1, 'Healthcare': 0.1, 'Retail': 0.1}
+            # Select merchant category based on heuristics
+            if cust['salary'] > 120000:
+                weights = {'Tech':0.4,'Entertainment':0.3,'Grocery':0.1,'Healthcare':0.1,'Retail':0.1}
             elif cust['age'] < 30:
-                category_weights = {'Tech': 0.3, 'Entertainment': 0.4, 'Grocery': 0.1, 'Healthcare': 0.1, 'Retail': 0.1}
+                weights = {'Tech':0.3,'Entertainment':0.4,'Grocery':0.1,'Healthcare':0.1,'Retail':0.1}
             else:
-                category_weights = {'Tech': 0.2, 'Entertainment': 0.2, 'Grocery': 0.3, 'Healthcare': 0.2, 'Retail': 0.1}
-            
-            category = self.weighted_choice(list(category_weights.keys()), list(category_weights.values()))[0]
+                weights = {'Tech':0.2,'Entertainment':0.2,'Grocery':0.3,'Healthcare':0.2,'Retail':0.1}
+
+            category = self.weighted_choice(list(weights.keys()), list(weights.values()))[0]
             merchant_id = np.random.choice(merchant_dict[category])
-            
-            # Transaction amount influenced by income & behavior
-            base = merchants.loc[merchants['merchant_id'] == merchant_id, 'avg_transaction'].values[0]
-            multiplier = {'Aggressive': 1.5, 'Moderate': 1.0, 'Conservative': 0.7}[cust['behavior']]
-            amount = np.round(base * multiplier * np.random.uniform(0.8, 1.2), 2)
-            
-            # Random date
+
+            # Transaction amount
+            base = next(m['acc_balance'] for m in merchants if m['merchant_id']==merchant_id)/100
+            multiplier = {'Aggressive': 1.5, 'Moderate': 1.0, 'Conservative': 0.7}[cust['behavior']] #9 means behavior
+            amount = float(np.round(base * multiplier * np.random.uniform(0.8,1.2),2))
+
             date = self.random_dates(START_DATE, END_DATE, 1)[0]
-            
+
             transactions.append({
-                'customer_id': cust['customer_id'],
+                'customer_id': cust['id'],
                 'merchant_id': merchant_id,
                 'amount': amount,
                 'date': date
             })
         
-        return pd.DataFrame(transactions)
+        return transactions
+
+    # ------------------- Run Test2 -------------------
+    async def run(self):
+        logger.info("Generating customers and merchants...")
+        customers = self.generate_customers(NUM_CUSTOMERS)
+        merchants = self.generate_merchants(NUM_MERCHANTS)
+
+        logger.info("Generating transactions...")
+        transactions = self.generate_transactions(customers, merchants, NUM_TRANSACTIONS)
+        await self.dp.init()
+        # Save all to PostgreSQL via DataProcessor
+        logger.info("Saving customers to DB...")
+        for c in customers:
+            await self.dp.save_customer(c)
+        logger.info("Saving merchants to DB...")
+        for m in merchants:
+            await self.dp.save_merchant(m)
+        logger.info("Running transactions...")
+        for tx in transactions:
+            await self.dp.make_transaction(tx['customer_id'], tx['merchant_id'], tx['amount'])
+
+        logger.info("Test2 completed: 50k transactions simulated!")
 
 
-    customers_df = generate_customers(NUM_CUSTOMERS)
-    merchants_df = generate_merchants(NUM_MERCHANTS)
-    transactions_df = generate_transactions(customers_df, merchants_df, NUM_TRANSACTIONS)
 
-    conn = sqlite3.connect('synthetic_data.db')
-    customers_df.to_sql('customers', conn, if_exists='replace', index=False)
-    merchants_df.to_sql('merchants', conn, if_exists='replace', index=False)
-    transactions_df.to_sql('transactions', conn, if_exists='replace', index=False)
-    conn.close()
 
-    logger.info(" Synthetic dataset generated and saved to 'synthetic_data.db'")
